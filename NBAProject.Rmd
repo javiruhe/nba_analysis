@@ -177,15 +177,3 @@ picksAverage <- dataPerformance %>% group_by(overall_pick) %>%
   summarise(overall_performance = mean(overall_performance))
 ```
 
-```{r}
-library(usethis)
-use_git_config(user.name = "Pavlo-py", user.email = "pasanlez@gmail.com")
-```
-```{r}
-create_github_token()
-```
-
-```{r}
-usethis::use_github()
-```
-
