@@ -1,0 +1,179 @@
+---
+title: "NBAProject"
+output:
+  flexdashboard::flex_dashboard:
+    vertical_layout: fill
+runtime: shiny
+---
+
+```{r global, include=FALSE}
+library(pxR)
+library(MASS)
+library(shinydashboard)
+library(datasets)
+library(highcharter) 
+library(fpp3)
+library(RColorBrewer)
+library(openxlsx)  
+library(leaflet)  
+library(geojsonio)
+library(plotly)
+library(ggplot2)
+library(tidyverse)
+```
+
+
+
+```{r}
+# asociamos funciones a determinadas librerías para evitar posibles errores 
+select <- dplyr::select
+mutate <- dplyr::mutate
+filter <- dplyr::filter
+group_by <- dplyr::group_by
+summarise <- dplyr::summarise
+selectInput <- shiny::selectInput
+```
+
+
+```{r}
+# Cálculo de la transformación de Yeo–Johnson a partir de un vector y un valor de lambda 
+yeo.johnson <- function(y, lambda) {
+  y_t <- numeric(length(y))
+  
+  # Para y >= 0
+  pos_idx <- which(y >= 0)
+  if (lambda == 0) {
+    y_t[pos_idx] <- log(y[pos_idx] + 1)
+  } else {
+    y_t[pos_idx] <- ((y[pos_idx] + 1)^lambda - 1) / lambda
+  }
+  
+  # Para y < 0
+  neg_idx <- which(y < 0)
+  if (lambda == 2) {
+    y_t[neg_idx] <- -log(-y[neg_idx] + 1)
+  } else {
+    y_t[neg_idx] <- -(((-y[neg_idx] + 1)^(2 - lambda) - 1) / (2 - lambda))
+  }
+  
+  return(y_t)
+}
+
+# Estimación óptima de lambda para la transformación de Yeo–Johnson a un vector y para el R2 de la regresión lineal con un vector x sea máximo 
+optimize.yeojohnson.R2 <- function(x, y, lambda_range = c(-1, 1.9)) {
+ 
+  # Función objetivo: R² negativo (porque optimize minimiza)
+  r2_neg <- function(lambda) {
+    y_t <- yeo.johnson(y, lambda)
+    modelo <- lm(y_t ~ x)
+    return(-summary(modelo)$r.squared)  # queremos maximizar R²
+  }
+  
+  # Optimización de lambda
+  opt <- optimize(r2_neg, interval = lambda_range)
+  
+  # Se retorna el valor óptimo de lambda 
+  return(opt$minimum)
+}
+
+```
+
+
+```{r}
+ParetoValue <- function(v, ParetoSignificancia){
+  x <- sort(v, decreasing = TRUE)
+  return(x[which(cumsum(x) >= ParetoSignificancia * sum(x))[1]])
+}
+```
+
+
+
+```{r}
+rawData <- readr::read_csv('nbaplayersdraft.csv')
+```
+
+```{r}
+data <- rawData %>% 
+  select(-id, -rank) %>%
+  mutate(year = as.character(year),
+         overall_pick = as.character(overall_pick)
+         ) %>%
+  replace_na(list(college = "Didn't play College")) %>%
+  mutate_if(is.numeric, ~replace_na(., 0)) %>%
+  pivot_longer(years_active:value_over_replacement, names_to = 'indicator', values_to = 'value')
+```
+
+```{r}
+data <- data %>% group_by(indicator) %>%
+  mutate(normValue = ((value - min(value)) / (max(value) - min(value)))) %>%
+  ungroup()
+```
+
+```{r}
+categories <- c("Generational", "SuperStar", "Star", "Elite", "Starter", "Solid", "Role", "Rotation", "Deep")
+
+fields <- c("year", "overall_pick", "team" , "player", "college")
+
+data_fields <- data %>% filter(!indicator %in% fields)
+
+baremo <- quantile(data_fields$normValue, probs = c(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9))
+
+
+
+player_success <- data_fields %>%
+  group_by(player) %>% 
+  summarise(
+    overall_performance = case_when(
+      indicator %in% c("years_active", "games", "minutes_played") ~ mean(normValue),
+      indicator %in% c("points", "assists", "total_rebounds") ~ mean(normValue) * 1.5,
+      indicator %in% c("field_goal_percentage", "3_point_percentage", "free_throw_percentage") ~ mean(normValue) * 1.25,
+      indicator %in% c("average_minutes_played", "points_per_game", "average_total_rebounds", "average_assists") ~ mean(normValue) * 1.75,
+      indicator %in% c("win_shares", "win_shares_per_48_minutes", "box_plus_minus", "value_over_replacement") ~ mean(normValue) * 2,
+      ),
+  ) %>%
+  mutate(rank = case_when(
+    overall_performance >= baremo[9] ~ "Generational",
+    overall_performance >= baremo[8] ~ "SuperStar",
+    overall_performance >= baremo[7] ~ "Star",
+    overall_performance >= baremo[6] ~ "Elite",
+    overall_performance >= baremo[5] ~ "Starter",
+    overall_performance >= baremo[4] ~ "Solid",
+    overall_performance >= baremo[3] ~ "Role",
+    overall_performance >= baremo[2] ~ "Rotation",
+    TRUE ~ "Deep"
+  )) %>%
+  mutate(rank = factor(rank, levels = categories))
+```
+
+
+```{r}
+dataPerformance <- data %>% left_join(player_success, by = "player") %>%
+  select(year, overall_pick, rank, team, player, college, indicator, value, normValue, overall_performance)
+```
+
+
+```{r}
+reDraft <- dataPerformance %>%
+  group_by(year, player) %>%
+  summarise(overall_performance = mean(overall_performance)) %>%
+  ungroup() %>%
+  group_by(year) %>%
+  arrange(year, desc(overall_performance)) %>%
+  mutate(newPick = row_number()) %>%
+  filter(newPick <= 60) %>%
+  ungroup() %>%
+  select(-year, -overall_performance)
+```
+
+```{r}
+dataReDraft <- dataPerformance %>% left_join(reDraft, by = "player") %>%
+  mutate(pickDifference = as.numeric(overall_pick) - newPick) %>%
+  relocate(c(newPick, pickDifference), .after = overall_pick)
+```
+
+
+```{r}
+picksAverage <- dataPerformance %>% group_by(overall_pick) %>%
+  summarise(overall_performance = mean(overall_performance))
+```
+
