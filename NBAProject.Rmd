@@ -94,19 +94,17 @@ rawData <- readr::read_csv('nbaplayersdraft.csv')
 ```
 
 ```{r}
+categories <- rawData %>% select(-id, -rank, -year, -team, -player, -overall_pick, -field_goal_percentage, -free_throw_percentage, -`3_point_percentage`, -box_plus_minus, -win_shares, -win_shares_per_48_minutes, -value_over_replacement) %>% colnames()
 data <- rawData %>% 
   select(-id, -rank) %>%
-  mutate(year = as.character(year),
-         overall_pick = as.character(overall_pick)
-         ) %>%
   replace_na(list(college = "Didn't play College")) %>%
-  mutate_if(is.numeric, ~replace_na(., 0)) %>%
+  mutate(across(categories, ~replace_na(.x, 0))) %>%
   pivot_longer(years_active:value_over_replacement, names_to = 'indicator', values_to = 'value')
 ```
 
 ```{r}
 data <- data %>% group_by(indicator) %>%
-  mutate(normValue = ((value - min(value)) / (max(value) - min(value)))) %>%
+  mutate(normValue = (value - min(value, na.rm = TRUE)) / (max(value, na.rm = TRUE) - min(value, na.rm = TRUE))) %>%
   ungroup()
 ```
 
@@ -129,7 +127,7 @@ player_scores <- data_fields %>%
   ) %>%
   group_by(player, year, overall_pick) %>%
   summarise(
-    overall_performance = sum(weighted_value),
+    overall_performance = sum(weighted_value, na.rm = TRUE),
   ) %>% ungroup()
 
 baremo <- quantile(player_scores$overall_performance, probs = c(0.15, 0.30, 0.50, 0.65, 0.78, 0.88, 0.96, 0.99))
@@ -147,7 +145,7 @@ player_success <- player_scores %>%
       overall_performance >= baremo[1] ~ "Rotation",
       TRUE ~ "Deep"
     ),
-    rank = factor(rank, levels = categories, ordered = TRUE)
+    rank = factor(rank, levels = c("Generational", "SuperStar", "Star", "Elite", "Starter", "Solid", "Role", "Rotation", "Deeo"), ordered = TRUE)
   ) %>% select(-overall_pick, -year)
 ```
 
@@ -173,7 +171,7 @@ reDraft <- dataPerformance %>%
 
 ```{r}
 dataReDraft <- dataPerformance %>% left_join(reDraft, by = "player") %>%
-  mutate(pickDifference = as.numeric(overall_pick) - newPick) %>%
+  mutate(pickDifference = overall_pick - newPick) %>%
   relocate(c(newPick, pickDifference), .after = overall_pick)
 ```
 
@@ -191,11 +189,6 @@ ideal_curve_spline$expected_perf <- predict(spline_model, newdata = ideal_curve_
 
 ```{r}
 picksAverage <- picksAverage %>% left_join(ideal_curve_spline, by = "overall_pick")
-```
-
-```{r}
-picksAverage <- picksAverage %>% mutate(overall_pick = as.character(overall_pick))
-
 ```
 
 ```{r}
@@ -217,10 +210,6 @@ tidyMetrics <- newMetrics %>%
   )
 
 temptidyData <- bind_rows(base, tidyMetrics) %>% arrange(year, player, indicator)
-```
-
-```{r}
-unique(tidyData$indicator)
 ```
 
 
