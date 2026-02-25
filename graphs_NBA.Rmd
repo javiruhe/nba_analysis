@@ -65,19 +65,18 @@ optimize.yeojohnson.R2 <- function(x, y, lambda_range = c(-1, 1.9)) {
 
 
 ```{r}
-dataReDraft <- read_csv("dataReDraft.csv") %>% as_tibble()
-dataPerformance <- read_csv("dataPerformance.csv") %>% as_tibble()
+tidyData <- read_csv("tidyData.csv") %>% as_tibble()
+untidyData <- read_csv("untidyData.csv") %>% as_tibble()
 ```
 
 ```{r, echo=FALSE, }
-top_redraft <- dataReDraft %>%
+top_redraft <- untidyData %>%
   filter(year == 2018) %>% 
   distinct(player, .keep_all = TRUE) %>%
-  arrange(newPick) %>%
-  head(10)
+  arrange(newPick)
 
 hchart(top_redraft, "scatter", hcaes(x = as.numeric(overall_pick), y = newPick, group = rank)) %>%
-  hc_title(text = "Realidad vs. Valor Esperado (Re-Draft)") %>%
+  hc_title(text = "Re-Draft 2018") %>%
   hc_xAxis(title = list(text = "Pick Original")) %>%
   hc_yAxis(title = list(text = "Nuevo Pick (Basado en Performance)"), reversed = TRUE) %>%
   hc_tooltip(pointFormat = "<b>{point.player}</b><br>Pick Original: {point.x}<br>Nuevo Pick: {point.y}<br>Diferencia: {point.pickDifference}") %>%
@@ -85,7 +84,7 @@ hchart(top_redraft, "scatter", hcaes(x = as.numeric(overall_pick), y = newPick, 
 ```
 
 ```{r}
-plot_ly(dataPerformance %>% distinct(player, .keep_all = TRUE), 
+plot_ly(tidyData %>% distinct(player, .keep_all = TRUE), 
         x = ~team, color = ~rank, type = "histogram") %>%
   layout(barmode = "stack",
          title = "Composición de Talento Drafteado por Equipo",
@@ -95,8 +94,11 @@ plot_ly(dataPerformance %>% distinct(player, .keep_all = TRUE),
 
 
 ```{r}
-df_heat <- dataPerformance %>%
-  filter(year == "2016", rank %in% c("Generational")) %>%
+df_heat <- tidyData %>%
+  filter(year == "2016", rank %in% c("Generational", "SuperStar", "Star", "Elite")) %>%
+  group_by(indicator) %>%
+  mutate(normValue = ((value - min(value)) / (max(value) - min(value)))) %>%
+  ungroup() %>%
   group_by(player, indicator) %>%
   summarise(avg_norm = mean(normValue))
 
@@ -107,7 +109,7 @@ hchart(df_heat, "heatmap", hcaes(x = indicator, y = player, value = avg_norm)) %
 ```
 
 ```{r}
-df_college <- dataPerformance %>%
+df_college <- untidyData %>%
   distinct(player, .keep_all = TRUE) %>%
   group_by(college) %>%
   summarise(n = n(), performance = mean(overall_performance)) %>%

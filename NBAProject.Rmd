@@ -112,8 +112,6 @@ data <- data %>% group_by(indicator) %>%
 
 
 ```{r}
-categories <- c("Generational", "SuperStar", "Star", "Elite", "Starter", "Solid", "Role", "Rotation", "Deep")
-
 fields <- c("year", "overall_pick", "team" , "player", "college")
 
 data_fields <- data %>% filter(!indicator %in% fields)
@@ -243,5 +241,10 @@ untidyData <- temptidyData %>%
     names_from = indicator,
     values_from = value
   )
+```
+
+```{r}
+tidyData %>% write_csv("tidyData.csv")
+untidyData %>% write_csv("untidyData.csv")
 ```
 
