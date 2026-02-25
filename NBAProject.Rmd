@@ -20,6 +20,7 @@ library(geojsonio)
 library(plotly)
 library(ggplot2)
 library(tidyverse)
+library(splines)
 ```
 
 
@@ -154,7 +155,7 @@ dataPerformance <- data %>% left_join(player_success, by = "player") %>%
 
 ```{r}
 reDraft <- dataPerformance %>%
-  group_by(year, player) %>%
+  group_by(year, player, indicator) %>%
   summarise(overall_performance = mean(overall_performance)) %>%
   ungroup() %>%
   group_by(year) %>%
@@ -174,6 +175,20 @@ dataReDraft <- dataPerformance %>% left_join(reDraft, by = "player") %>%
 
 ```{r}
 picksAverage <- dataPerformance %>% group_by(overall_pick) %>%
-  summarise(overall_performance = mean(overall_performance))
+  mutate(overall_pick = as.numeric(overall_pick)) %>%
+  summarise(observed_perf = mean(overall_performance))
+
+spline_model <- lm(observed_perf ~ ns(overall_pick, knots = c(5, 14, 30, 44), Boundary.knots = c(1,60)), data = picksAverage)
+
+ideal_curve_spline <- data.frame(overall_pick = 1:60)
+ideal_curve_spline$expected_perf <- predict(spline_model, newdata = ideal_curve_spline)
+```
+
+```{r}
+picksAverage
+```
+
+```{r}
+picksAverage <- picksAverage %>% left_join(ideal_curve_spline, by = "overall_pick")
 ```
 
