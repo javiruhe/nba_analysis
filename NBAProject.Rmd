@@ -108,6 +108,72 @@ data <- data %>% group_by(indicator) %>%
   ungroup()
 ```
 
+```{r}
+fields <- c("year", "overall_pick", "team" , "player", "college")
+data_fields <- data %>% filter(!indicator %in% fields)
+
+df_pca <- data_fields %>%
+  filter(indicator %in% c("value_over_replacement", "box_plus_minus", "win_shares", 
+                          "win_shares_per_48_minutes", "points_per_game", 
+                          "average_total_rebounds", "average_assists", 
+                          "field_goal_percentage", "3_point_percentage", 
+                          "free_throw_percentage", "years_active", "games", 
+                          "minutes_played", "average_minutes_played")) %>%
+  select(player, year, overall_pick, indicator, normValue) %>%
+  pivot_wider(names_from = indicator, values_from = normValue) %>%
+  mutate(across(where(is.numeric), ~replace_na(.x, 0)))
+
+columnas_metricas <- df_pca %>% select(-player, -year, -overall_pick)
+
+pca_nba <- prcomp(columnas_metricas, scale. = TRUE)
+
+var_explicada <- pca_nba$sdev^2 / sum(pca_nba$sdev^2)
+
+rotaciones_abs <- abs(pca_nba$rotation)
+
+pesos_crudos <- rotaciones_abs %*% var_explicada
+
+pesos_finales <- (pesos_crudos / max(pesos_crudos)) * 3.0
+
+df_pesos <- tibble(
+  indicator = rownames(pesos_crudos),
+  peso_calculado = as.numeric(pesos_finales)
+) %>%
+  arrange(desc(peso_calculado))
+
+player_scores <- data_fields %>%
+  filter(!indicator %in% c("points", "total_rebounds", "assists")) %>%
+  left_join(df_pesos, by = "indicator") %>%
+  mutate(peso_calculado = replace_na(peso_calculado, 1)) %>%
+  mutate(weighted_value = normValue * peso_calculado) %>%
+  group_by(player, year, overall_pick) %>%
+  summarise(
+    overall_performance = sum(weighted_value, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+baremo <- quantile(player_scores$overall_performance, probs = c(0.15, 0.30, 0.50, 0.65, 0.78, 0.88, 0.96, 0.99))
+categories <- c("Generational", "SuperStar", "Star", "Elite", "Starter", "Solid", "Role", "Rotation", "Deep")
+
+player_success <- player_scores %>%
+ mutate(
+    rank = case_when(
+      overall_performance >= baremo[8] ~ "Generational",
+      overall_performance >= baremo[7] ~ "SuperStar",
+      overall_performance >= baremo[6] ~ "Star",
+      overall_performance >= baremo[5] ~ "Elite",
+      overall_performance >= baremo[4] ~ "Starter",
+      overall_performance >= baremo[3] ~ "Solid",
+      overall_performance >= baremo[2] ~ "Role",
+      overall_performance >= baremo[1] ~ "Rotation",
+      TRUE ~ "Deep"
+    ),
+    rank = factor(rank, levels = categories, ordered = TRUE)
+  ) %>% 
+  arrange(desc(overall_performance)) %>% 
+  select(-overall_pick, -year)
+```
+
 
 ```{r}
 fields <- c("year", "overall_pick", "team" , "player", "college")
@@ -145,20 +211,19 @@ player_success <- player_scores %>%
       overall_performance >= baremo[1] ~ "Rotation",
       TRUE ~ "Deep"
     ),
-    rank = factor(rank, levels = c("Generational", "SuperStar", "Star", "Elite", "Starter", "Solid", "Role", "Rotation", "Deeo"), ordered = TRUE)
-  ) %>% select(-overall_pick, -year)
+    rank = factor(rank, levels = c("Generational", "SuperStar", "Star", "Elite", "Starter", "Solid", "Role", "Rotation", "Deep"), ordered = TRUE)
+  )
 ```
 
-
 ```{r}
-dataPerformance <- data_fields %>% left_join(player_success, by = "player") %>%
+dataPerformance <- data_fields %>% left_join(player_success, by = c("player", "year", "overall_pick")) %>%
   select(year, overall_pick, rank, team, player, college, indicator, value, overall_performance)
 ```
 
 
 ```{r}
 reDraft <- dataPerformance %>%
-  group_by(year, player) %>%
+  group_by(year, player, overall_pick) %>%
   summarise(overall_performance = mean(overall_performance)) %>%
   ungroup() %>%
   group_by(year) %>%
@@ -166,11 +231,12 @@ reDraft <- dataPerformance %>%
   mutate(newPick = row_number()) %>%
   filter(newPick <= 60) %>%
   ungroup() %>%
-  select(-year, -overall_performance)
+  select(-overall_performance)
 ```
 
 ```{r}
-dataReDraft <- dataPerformance %>% left_join(reDraft, by = "player") %>%
+dataReDraft <- dataPerformance %>% 
+  left_join(reDraft, by = c("player", "year", "overall_pick")) %>%
   mutate(pickDifference = overall_pick - newPick) %>%
   relocate(c(newPick, pickDifference), .after = overall_pick)
 ```
@@ -221,7 +287,7 @@ tidyData <- temptidyData %>%
     TRUE ~ "Player"
   )) %>%
   relocate(unit, .before = indicator) %>% 
-  arrange(year, player, unit, indicator)
+  arrange(year, overall_pick, unit)
 ```
 
 ```{r}
